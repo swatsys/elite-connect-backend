@@ -68,6 +68,95 @@
 // export default app;
 
 
+// import express from 'express';
+// import mongoose from 'mongoose';
+// import cors from 'cors';
+// import dotenv from 'dotenv';
+
+// // Import routes
+// import authRoutes from './routes/auth.js';
+// import profileRoutes from './routes/profile.js';
+// import exploreRoutes from './routes/explore.js';
+// import chatRoutes from './routes/chat.js';
+// import subscriptionRoutes from './routes/subscription.js';
+
+// dotenv.config();
+
+// const app = express();
+
+// // Middleware - CORS Configuration for World App
+// app.use(cors({
+//   origin: [
+//     'https://frontend-swatsys-projects.vercel.app',
+//     'https://worldcoin.org',
+//     'https://world.org',
+//     'capacitor://localhost',  // For World App mobile
+//     'ionic://localhost',      // Alternative for Ionic apps
+//     'http://localhost:5173'
+//   ],
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization'],
+//   exposedHeaders: ['Content-Length', 'X-Request-Id']
+// }));
+
+// app.use(express.json({ limit: '10mb' }));
+// app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// // Add request logging for debugging
+// app.use((req, res, next) => {
+//   console.log(`📥 ${req.method} ${req.path} - Origin: ${req.get('origin') || 'none'}`);
+//   next();
+// });
+
+// // Database connection
+// mongoose.connect(process.env.MONGODB_URI)
+//   .then(() => console.log('✅ MongoDB connected'))
+//   .catch(err => console.error('❌ MongoDB connection error:', err));
+
+// // Routes
+// app.use('/api/auth', authRoutes);
+// app.use('/api/profile', profileRoutes);
+// app.use('/api/explore', exploreRoutes);
+// app.use('/api/chat', chatRoutes);
+// app.use('/api/subscription', subscriptionRoutes);
+
+// // Health check
+// app.get('/api/health', (req, res) => {
+//   res.json({ 
+//     status: 'ok', 
+//     timestamp: new Date().toISOString(),
+//     service: 'Elite Connect API'
+//   });
+// });
+
+// // Error handling
+// app.use((err, req, res, next) => {
+//   console.error('Error:', err);
+//   res.status(500).json({ 
+//     success: false, 
+//     error: err.message || 'Internal server error' 
+//   });
+// });
+
+// // 404 handler
+// app.use((req, res) => {
+//   res.status(404).json({ 
+//     success: false, 
+//     error: 'Route not found' 
+//   });
+// });
+
+// const PORT = process.env.PORT || 5001;
+
+// app.listen(PORT, () => {
+//   console.log(`🚀 Server running on port ${PORT}`);
+//   console.log(`📱 Mini App API ready`);
+//   console.log(`🌍 World App ID: ${process.env.WORLD_APP_ID}`);
+// });
+
+// export default app;
+
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
@@ -84,75 +173,174 @@ dotenv.config();
 
 const app = express();
 
-// Middleware - CORS Configuration for World App
+// ============================================
+// CORS Configuration for World App - UPDATED!
+// ============================================
 app.use(cors({
-  origin: [
-    'https://frontend-swatsys-projects.vercel.app',
-    'https://worldcoin.org',
-    'https://world.org',
-    'capacitor://localhost',  // For World App mobile
-    'ionic://localhost',      // Alternative for Ionic apps
-    'http://localhost:5173'
-  ],
+  origin: function(origin, callback) {
+    console.log('🌐 Request from origin:', origin);
+    
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) {
+      console.log('✅ No origin - allowing request');
+      return callback(null, true);
+    }
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'https://frontend-swatsys-projects.vercel.app',
+      'https://worldcoin.org',
+      'https://world.org',
+      'capacitor://localhost',
+      'ionic://localhost',
+      'http://localhost:5173',
+      'http://localhost:3000'
+    ];
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ Origin allowed:', origin);
+      return callback(null, true);
+    }
+    
+    // Allow localhost with any port for development
+    if (origin.startsWith('http://localhost')) {
+      console.log('✅ Localhost origin allowed:', origin);
+      return callback(null, true);
+    }
+    
+    // For debugging - allow all origins temporarily
+    console.log('✅ Allowing origin (debug mode):', origin);
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['Content-Length', 'X-Request-Id']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Add request logging for debugging
+// ============================================
+// Request Logging Middleware - IMPORTANT!
+// ============================================
 app.use((req, res, next) => {
-  console.log(`📥 ${req.method} ${req.path} - Origin: ${req.get('origin') || 'none'}`);
+  const timestamp = new Date().toISOString();
+  const origin = req.get('origin') || 'no-origin';
+  const method = req.method;
+  const path = req.path;
+  
+  console.log(`📥 [${timestamp}] ${method} ${path} - Origin: ${origin}`);
+  
+  // Log request body for POST requests (except passwords)
+  if (method === 'POST' && req.body) {
+    const safeBody = { ...req.body };
+    if (safeBody.password) safeBody.password = '[REDACTED]';
+    console.log('📦 Request body:', JSON.stringify(safeBody, null, 2));
+  }
+  
   next();
 });
 
-// Database connection
+// ============================================
+// Body Parser Middleware
+// ============================================
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ============================================
+// Database Connection
+// ============================================
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ MongoDB connected'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
-// Routes
+// ============================================
+// API Routes
+// ============================================
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/explore', exploreRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 
-// Health check
+// ============================================
+// Health Check Endpoint
+// ============================================
 app.get('/api/health', (req, res) => {
+  console.log('💚 Health check called');
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    service: 'Elite Connect API'
+    service: 'Elite Connect API',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    worldAppId: process.env.WORLD_APP_ID
   });
 });
 
-// Error handling
+// ============================================
+// Root Endpoint
+// ============================================
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Elite Connect API',
+    status: 'running',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      profile: '/api/profile',
+      explore: '/api/explore',
+      chat: '/api/chat',
+      subscription: '/api/subscription'
+    }
+  });
+});
+
+// ============================================
+// Error Handling Middleware
+// ============================================
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ 
+  console.error('❌ Error occurred:', err);
+  console.error('❌ Stack:', err.stack);
+  
+  res.status(err.status || 500).json({ 
     success: false, 
-    error: err.message || 'Internal server error' 
+    error: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
 
-// 404 handler
+// ============================================
+// 404 Handler
+// ============================================
 app.use((req, res) => {
+  console.log('❓ 404 - Route not found:', req.method, req.path);
   res.status(404).json({ 
     success: false, 
-    error: 'Route not found' 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
   });
 });
 
-const PORT = process.env.PORT || 5001;
+// ============================================
+// Start Server
+// ============================================
+const PORT = process.env.PORT || 5002;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Mini App API ready`);
+  console.log('');
+  console.log('='.repeat(60));
+  console.log('🚀 Elite Connect Backend Server');
+  console.log('='.repeat(60));
+  console.log(`📍 Port: ${PORT}`);
   console.log(`🌍 World App ID: ${process.env.WORLD_APP_ID}`);
+  console.log(`📱 Mini App API: Ready`);
+  console.log(`🗄️  MongoDB: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Connecting...'}`);
+  console.log(`🌐 CORS: Enabled with World App support`);
+  console.log(`📥 Request Logging: Enabled`);
+  console.log('='.repeat(60));
+  console.log('');
 });
 
 export default app;
