@@ -377,7 +377,7 @@ app.use(cors({
     
     // List of allowed origins
     const allowedOrigins = [
-      'https://frontend-swatsys-projects.vercel.app',
+      'https://elite-connect-frontend-swatsys-projects.vercel.app',
       'https://worldcoin.org',
       'https://world.org',
       'capacitor://localhost',
