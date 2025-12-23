@@ -1,534 +1,213 @@
-// import express from 'express';
-// import mongoose from 'mongoose';
-// import cors from 'cors';
-// import dotenv from 'dotenv';
+import express from 'express'
+import cors from 'cors'
+import dotenv from 'dotenv'
+import mongoose from 'mongoose'
+import { verifyCloudProof } from '@worldcoin/minikit-js'
 
-// // Import routes
-// import authRoutes from './routes/auth.js';
-// import profileRoutes from './routes/profile.js';
-// import exploreRoutes from './routes/explore.js';
-// import chatRoutes from './routes/chat.js';
-// import subscriptionRoutes from './routes/subscription.js';
+dotenv.config()
 
-// dotenv.config();
+const app = express()
+const PORT = process.env.PORT || 3000
 
-// const app = express();
+// CORS - Allow all origins
+app.use(cors())
+app.use(express.json())
 
-// // Middleware
-// app.use(cors());
-// app.use(express.json({ limit: '10mb' }));
-// app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`)
+  next()
+})
 
-// // Database connection
-// mongoose.connect(process.env.MONGODB_URI)
-//   .then(() => console.log('✅ MongoDB connected'))
-//   .catch(err => console.error('❌ MongoDB connection error:', err));
+// MongoDB Connection
+let dbConnected = false
 
-// // Routes
-// app.use('/api/auth', authRoutes);
-// app.use('/api/profile', profileRoutes);
-// app.use('/api/explore', exploreRoutes);
-// app.use('/api/chat', chatRoutes);
-// app.use('/api/subscription', subscriptionRoutes);
-
-// // Health check
-// app.get('/api/health', (req, res) => {
-//   res.json({ 
-//     status: 'ok', 
-//     timestamp: new Date().toISOString(),
-//     service: 'Elite Connect API'
-//   });
-// });
-
-// // Error handling
-// app.use((err, req, res, next) => {
-//   console.error('Error:', err);
-//   res.status(500).json({ 
-//     success: false, 
-//     error: err.message || 'Internal server error' 
-//   });
-// });
-
-// // 404 handler
-// app.use((req, res) => {
-//   res.status(404).json({ 
-//     success: false, 
-//     error: 'Route not found' 
-//   });
-// });
-
-// const PORT = process.env.PORT || 5001;
-
-// app.listen(PORT, () => {
-//   console.log(`🚀 Server running on port ${PORT}`);
-//   console.log(`📱 Mini App API ready`);
-//   console.log(`🌍 World App ID: ${process.env.WORLD_APP_ID}`);
-// });
-
-// export default app;
-
-import express from 'express';
-import cors from 'cors';
-import jwt from 'jsonwebtoken';
-import axios from 'axios';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-const app = express();
-
-// ===== MIDDLEWARE =====
-app.use(cors());
-app.use(express.json());
-
-// ===== CONFIGURATION =====
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
-const WORLD_APP_ID = process.env.WORLD_APP_ID || 'app_486e187afe7bc69a19456a3fa901a162';
-const WORLD_API_BASE_URL = 'https://developer.worldcoin.org/api/v2';
-
-// ===== IN-MEMORY DATABASE (Replace with real database in production) =====
-const users = new Map(); // nullifier_hash -> user
-const profiles = new Map(); // user_id -> profile
-
-// ===== HELPER FUNCTIONS =====
-
-/**
- * Verify World ID proof with Worldcoin API
- */
-async function verifyWorldIDProof(payload, action, signal = '') {
+async function connectDB() {
   try {
-    console.log('Verifying World ID proof...');
-    console.log('Payload:', JSON.stringify(payload, null, 2));
+    const MONGODB_URI = process.env.MONGODB_URI
     
-    const verifyRes = await axios.post(
-      `${WORLD_API_BASE_URL}/verify/${WORLD_APP_ID}`,
-      {
-        nullifier_hash: payload.nullifier_hash,
-        merkle_root: payload.merkle_root,
-        proof: payload.proof,
-        verification_level: payload.verification_level,
-        action: action,
-        signal: signal
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      }
-    );
-
-    console.log('World API response:', verifyRes.data);
-    
-    if (verifyRes.data.success) {
-      console.log('✅ World ID proof verified successfully');
-      return {
-        success: true,
-        nullifier_hash: payload.nullifier_hash,
-        verification_level: payload.verification_level
-      };
-    } else {
-      console.error('❌ World ID verification failed:', verifyRes.data);
-      return {
-        success: false,
-        error: verifyRes.data.detail || 'Verification failed'
-      };
+    if (!MONGODB_URI) {
+      console.log('⚠️  MongoDB URI not configured - using in-memory storage')
+      return
     }
+    
+    console.log('📦 Connecting to MongoDB...')
+    
+    await mongoose.connect(MONGODB_URI)
+    
+    dbConnected = true
+    console.log('✅ MongoDB connected!')
+    
+    mongoose.connection.on('disconnected', () => {
+      dbConnected = false
+      console.log('❌ MongoDB disconnected')
+    })
+    
+    mongoose.connection.on('error', (err) => {
+      dbConnected = false
+      console.error('❌ MongoDB error:', err)
+    })
+    
   } catch (error) {
-    console.error('World ID verification error:', error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.detail || error.message || 'Verification failed'
-    };
+    console.error('❌ MongoDB connection failed:', error.message)
+    console.log('⚠️  Continuing with in-memory storage')
   }
 }
 
-/**
- * Generate JWT token
- */
-function generateToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
-}
+// In-memory storage (fallback if no MongoDB)
+const users = new Map()
 
-/**
- * Verify JWT token middleware
- */
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ success: false, error: 'No token provided' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(403).json({ success: false, error: 'Invalid token' });
-    }
-    req.userId = decoded.userId;
-    next();
-  });
-}
-
-// ===== ROUTES =====
-
-/**
- * Health check
- */
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    success: true, 
-    message: 'Elite Connect API is running',
-    timestamp: new Date().toISOString()
-  });
-});
+  const health = {
+    status: 'OK',
+    message: 'Elite Connect API',
+    timestamp: new Date().toISOString(),
+    environment: {
+      node_version: process.version,
+      app_id: process.env.APP_ID ? 'configured' : 'MISSING',
+      database: dbConnected ? 'MongoDB connected' : 'In-memory storage',
+      port: PORT
+    }
+  }
+  
+  res.json(health)
+})
 
-/**
- * Verify World ID and create/login user
- */
+// Database status endpoint
+app.get('/api/db-status', (req, res) => {
+  res.json({
+    mongodb_connected: dbConnected,
+    storage_type: dbConnected ? 'MongoDB' : 'In-memory',
+    connection_state: mongoose.connection.readyState,
+    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+    states: {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting'
+    }
+  })
+})
+
+// World ID verification endpoint
 app.post('/api/auth/verify', async (req, res) => {
   try {
-    console.log('\n=== AUTHENTICATION REQUEST ===');
-    const { payload, action, signal } = req.body;
-
-    if (!payload || !action) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Missing payload or action' 
-      });
-    }
-
-    // Verify the World ID proof with Worldcoin API
-    const verification = await verifyWorldIDProof(payload, action, signal);
-
-    if (!verification.success) {
-      console.error('Verification failed:', verification.error);
-      return res.status(400).json({ 
-        success: false, 
-        error: verification.error 
-      });
-    }
-
-    const nullifierHash = verification.nullifier_hash;
-    console.log('User nullifier hash:', nullifierHash);
-
-    // Check if user exists
-    let user = users.get(nullifierHash);
-
-    if (!user) {
-      // Create new user
-      console.log('Creating new user...');
-      user = {
-        id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        nullifier_hash: nullifierHash,
-        verification_level: verification.verification_level,
-        created_at: new Date().toISOString(),
-        profile_completed: false
-      };
-      users.set(nullifierHash, user);
-      console.log('✅ New user created:', user.id);
-    } else {
-      console.log('✅ Existing user found:', user.id);
-    }
-
-    // Generate JWT token
-    const token = generateToken(user.id);
-
-    res.json({
-      success: true,
-      token: token,
-      user: {
-        id: user.id,
-        profile_completed: user.profile_completed,
-        verification_level: user.verification_level,
-        created_at: user.created_at
-      }
-    });
-
-  } catch (error) {
-    console.error('Auth verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Get current user info
- */
-app.get('/api/auth/me', authenticateToken, (req, res) => {
-  try {
-    // Find user by ID
-    let user = null;
-    for (const [nullifierHash, userData] of users.entries()) {
-      if (userData.id === req.userId) {
-        user = userData;
-        break;
-      }
-    }
-
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'User not found' 
-      });
-    }
-
-    res.json({
-      id: user.id,
-      profile_completed: user.profile_completed,
-      verification_level: user.verification_level,
-      created_at: user.created_at
-    });
-
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Create user profile
- */
-app.post('/api/profile/create', authenticateToken, (req, res) => {
-  try {
-    console.log('\n=== CREATE PROFILE REQUEST ===');
-    const { name, age, gender, bio } = req.body;
-
-    // Validate required fields
-    if (!name || !age || !gender) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Missing required fields: name, age, gender' 
-      });
-    }
-
-    // Validate age
-    if (age < 18 || age > 100) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Age must be between 18 and 100' 
-      });
-    }
-
-    // Create profile
-    const profile = {
-      user_id: req.userId,
-      name: name.trim(),
-      age: parseInt(age),
-      gender: gender,
-      bio: bio ? bio.trim() : '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    profiles.set(req.userId, profile);
-    console.log('✅ Profile created for user:', req.userId);
-
-    // Update user's profile_completed status
-    for (const [nullifierHash, userData] of users.entries()) {
-      if (userData.id === req.userId) {
-        userData.profile_completed = true;
-        break;
-      }
-    }
-
-    res.json({
-      success: true,
-      profile: profile
-    });
-
-  } catch (error) {
-    console.error('Create profile error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Get user profile
- */
-app.get('/api/profile/me', authenticateToken, (req, res) => {
-  try {
-    const profile = profiles.get(req.userId);
-
-    if (!profile) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Profile not found' 
-      });
-    }
-
-    res.json({
-      success: true,
-      profile: profile
-    });
-
-  } catch (error) {
-    console.error('Get profile error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Get explore profiles (placeholder)
- */
-app.get('/api/explore/profiles', authenticateToken, (req, res) => {
-  try {
-    // Get all profiles except current user's
-    const allProfiles = [];
+    const { payload, action } = req.body
     
-    for (const [userId, profile] of profiles.entries()) {
-      if (userId !== req.userId) {
-        allProfiles.push({
-          id: userId,
-          name: profile.name,
-          age: profile.age,
-          gender: profile.gender,
-          bio: profile.bio
-        });
+    console.log('🔐 Verifying World ID...')
+    console.log('Action:', action)
+    console.log('Payload status:', payload?.status)
+    
+    const APP_ID = process.env.APP_ID
+    
+    if (!APP_ID) {
+      console.error('❌ APP_ID not configured!')
+      return res.status(500).json({
+        success: false,
+        error: 'APP_ID not configured on server. Check .env file!'
+      })
+    }
+    
+    console.log('🌍 Using App ID:', APP_ID)
+    
+    // Verify the proof with Worldcoin
+    const verifyRes = await verifyCloudProof(
+      payload,
+      APP_ID,
+      action,
+      '' // signal
+    )
+    
+    console.log('✅ Verification result:', verifyRes.success)
+    
+    if (verifyRes.success) {
+      const nullifier_hash = payload.nullifier_hash
+      
+      // Create or get user
+      let user = users.get(nullifier_hash)
+      if (!user) {
+        user = {
+          nullifier_hash,
+          created_at: new Date().toISOString()
+        }
+        users.set(nullifier_hash, user)
+        console.log('👤 New user created')
+      } else {
+        console.log('👤 Existing user')
       }
+      
+      // Simple token (in production use JWT)
+      const token = Buffer.from(nullifier_hash).toString('base64')
+      
+      return res.json({
+        success: true,
+        token,
+        user
+      })
+    } else {
+      console.error('❌ Verification failed')
+      return res.status(400).json({
+        success: false,
+        error: 'World ID verification failed',
+        details: verifyRes
+      })
     }
-
-    // Return first profile or empty array
-    res.json({
-      success: true,
-      profiles: allProfiles.length > 0 ? [allProfiles[0]] : []
-    });
-
   } catch (error) {
-    console.error('Get profiles error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
+    console.error('❌ Error:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
   }
-});
+})
 
-/**
- * Like a profile (placeholder)
- */
-app.post('/api/explore/like', authenticateToken, (req, res) => {
-  try {
-    const { profileId } = req.body;
-
-    if (!profileId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Missing profileId' 
-      });
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Elite Connect API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      db_status: '/api/db-status',
+      verify: 'POST /api/auth/verify'
     }
+  })
+})
 
-    console.log(`User ${req.userId} liked profile ${profileId}`);
-
-    res.json({
-      success: true,
-      matched: false // Implement matching logic in production
-    });
-
-  } catch (error) {
-    console.error('Like profile error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Pass a profile (placeholder)
- */
-app.post('/api/explore/pass', authenticateToken, (req, res) => {
-  try {
-    const { profileId } = req.body;
-
-    if (!profileId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Missing profileId' 
-      });
+// Start server
+async function startServer() {
+  // Connect to MongoDB first
+  await connectDB()
+  
+  app.listen(PORT, () => {
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('🚀 Elite Connect Backend')
+    console.log(`📡 Running on port ${PORT}`)
+    console.log(`🌍 App ID: ${process.env.APP_ID || '⚠️  NOT CONFIGURED'}`)
+    console.log(`💾 Database: ${dbConnected ? '✅ MongoDB' : '⚠️  In-memory'}`)
+    console.log('✅ Server ready!')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    
+    if (!process.env.APP_ID) {
+      console.log('')
+      console.log('⚠️  WARNING: APP_ID not set!')
+      console.log('📝 Add APP_ID to your .env file')
+      console.log('🔗 Get it from: https://developer.worldcoin.org')
+      console.log('')
     }
+    
+    if (!dbConnected) {
+      console.log('')
+      console.log('⚠️  WARNING: MongoDB not connected')
+      console.log('📝 Add MONGODB_URI to your .env file')
+      console.log('🔗 Get free MongoDB at: https://www.mongodb.com/cloud/atlas')
+      console.log('')
+    }
+  })
+}
 
-    console.log(`User ${req.userId} passed profile ${profileId}`);
-
-    res.json({
-      success: true
-    });
-
-  } catch (error) {
-    console.error('Pass profile error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-/**
- * Get chat matches (placeholder)
- */
-app.get('/api/chat/matches', authenticateToken, (req, res) => {
-  try {
-    // Return empty matches for now
-    res.json({
-      success: true,
-      matches: []
-    });
-
-  } catch (error) {
-    console.error('Get matches error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
-    });
-  }
-});
-
-// ===== ERROR HANDLING =====
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    success: false, 
-    error: 'Internal server error' 
-  });
-});
-
-// ===== START SERVER =====
-app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════╗
-║   Elite Connect API Server Running   ║
-╠═══════════════════════════════════════╣
-║   Port: ${PORT}                         ║
-║   Environment: ${process.env.NODE_ENV || 'development'}              ║
-║   World App ID: ${WORLD_APP_ID.substring(0, 20)}...   ║
-╚═══════════════════════════════════════╝
-  `);
-  console.log('✅ Server is ready to accept requests');
-  console.log('📝 API Endpoints:');
-  console.log('   GET  /api/health');
-  console.log('   POST /api/auth/verify');
-  console.log('   GET  /api/auth/me');
-  console.log('   POST /api/profile/create');
-  console.log('   GET  /api/profile/me');
-  console.log('   GET  /api/explore/profiles');
-  console.log('   POST /api/explore/like');
-  console.log('   POST /api/explore/pass');
-  console.log('   GET  /api/chat/matches');
-  console.log('');
-});
-
-export default app;
-
+startServer()
 // import express from 'express';
 // import mongoose from 'mongoose';
 // import cors from 'cors';
