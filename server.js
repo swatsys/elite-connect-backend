@@ -2,14 +2,22 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import mongoose from 'mongoose'
-import { verifyCloudProof } from '@worldcoin/minikit-js'
+
+// Import routes
+import authRoutes from './routes/auth.js'
+import profileRoutes from './routes/profile.js'
+import exploreRoutes from './routes/explore.js'
+import chatRoutes from './routes/chat.js'
+import subscriptionRoutes from './routes/subscription.js'
 
 dotenv.config()
 
 const app = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 5002
 
-// CORS - Allow all origins
+// ============================================
+// MIDDLEWARE
+// ============================================
 app.use(cors())
 app.use(express.json())
 
@@ -19,195 +27,168 @@ app.use((req, res, next) => {
   next()
 })
 
-// MongoDB Connection
-let dbConnected = false
+// ============================================
+// DATABASE CONNECTION
+// ============================================
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/elite-connect'
 
-async function connectDB() {
-  try {
-    const MONGODB_URI = process.env.MONGODB_URI
-    
-    if (!MONGODB_URI) {
-      console.log('⚠️  MongoDB URI not configured - using in-memory storage')
-      return
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('✅ MongoDB connected')
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err)
+    // For development: Continue without MongoDB
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('⚠️  Continuing without MongoDB (development mode)')
     }
-    
-    console.log('📦 Connecting to MongoDB...')
-    
-    await mongoose.connect(MONGODB_URI)
-    
-    dbConnected = true
-    console.log('✅ MongoDB connected!')
-    
-    mongoose.connection.on('disconnected', () => {
-      dbConnected = false
-      console.log('❌ MongoDB disconnected')
+  })
+
+// ============================================
+// AUTH MIDDLEWARE
+// ============================================
+export function authenticateToken(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '')
+  
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'No token provided'
     })
-    
-    mongoose.connection.on('error', (err) => {
-      dbConnected = false
-      console.error('❌ MongoDB error:', err)
-    })
-    
+  }
+  
+  try {
+    // Simple token verification (base64 decode)
+    const nullifier_hash = Buffer.from(token, 'base64').toString('utf-8')
+    req.nullifier_hash = nullifier_hash
+    next()
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message)
-    console.log('⚠️  Continuing with in-memory storage')
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid token'
+    })
   }
 }
 
-// In-memory storage (fallback if no MongoDB)
-const users = new Map()
+// ============================================
+// ROUTES
+// ============================================
+app.use('/api/auth', authRoutes)
+app.use('/api/profile', authenticateToken, profileRoutes)
+app.use('/api/explore', authenticateToken, exploreRoutes)
+app.use('/api/chat', authenticateToken, chatRoutes)
+app.use('/api/subscription', authenticateToken, subscriptionRoutes)
 
 // Health check
-app.get('/api/health', (req, res) => {
-  const health = {
+app.get('/api/health', async (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  
+  res.json({
     status: 'OK',
     message: 'Elite Connect API',
     timestamp: new Date().toISOString(),
-    environment: {
-      node_version: process.version,
-      app_id: process.env.APP_ID ? 'configured' : 'MISSING',
-      database: dbConnected ? 'MongoDB connected' : 'In-memory storage',
-      port: PORT
-    }
-  }
-  
-  res.json(health)
-})
-
-// Database status endpoint
-app.get('/api/db-status', (req, res) => {
-  res.json({
-    mongodb_connected: dbConnected,
-    storage_type: dbConnected ? 'MongoDB' : 'In-memory',
-    connection_state: mongoose.connection.readyState,
-    // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
-    states: {
-      0: 'disconnected',
-      1: 'connected',
-      2: 'connecting',
-      3: 'disconnecting'
+    app_id: process.env.APP_ID ? 'configured' : 'NOT CONFIGURED',
+    database: dbStatus,
+    features: {
+      authentication: true,
+      profiles: true,
+      swipe_match: true,
+      chat: true,
+      subscriptions: true
     }
   })
-})
-
-// World ID verification endpoint
-app.post('/api/auth/verify', async (req, res) => {
-  try {
-    const { payload, action } = req.body
-    
-    console.log('🔐 Verifying World ID...')
-    console.log('Action:', action)
-    console.log('Payload status:', payload?.status)
-    
-    const APP_ID = process.env.APP_ID
-    
-    if (!APP_ID) {
-      console.error('❌ APP_ID not configured!')
-      return res.status(500).json({
-        success: false,
-        error: 'APP_ID not configured on server. Check .env file!'
-      })
-    }
-    
-    console.log('🌍 Using App ID:', APP_ID)
-    
-    // Verify the proof with Worldcoin
-    const verifyRes = await verifyCloudProof(
-      payload,
-      APP_ID,
-      action,
-      '' // signal
-    )
-    
-    console.log('✅ Verification result:', verifyRes.success)
-    
-    if (verifyRes.success) {
-      const nullifier_hash = payload.nullifier_hash
-      
-      // Create or get user
-      let user = users.get(nullifier_hash)
-      if (!user) {
-        user = {
-          nullifier_hash,
-          created_at: new Date().toISOString()
-        }
-        users.set(nullifier_hash, user)
-        console.log('👤 New user created')
-      } else {
-        console.log('👤 Existing user')
-      }
-      
-      // Simple token (in production use JWT)
-      const token = Buffer.from(nullifier_hash).toString('base64')
-      
-      return res.json({
-        success: true,
-        token,
-        user
-      })
-    } else {
-      console.error('❌ Verification failed')
-      return res.status(400).json({
-        success: false,
-        error: 'World ID verification failed',
-        details: verifyRes
-      })
-    }
-  } catch (error) {
-    console.error('❌ Error:', error)
-    res.status(500).json({
-      success: false,
-      error: error.message
-    })
-  }
 })
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     message: 'Elite Connect API',
-    version: '1.0.0',
+    version: '3.0.0 (Complete)',
+    features: [
+      'World ID Authentication',
+      'Profile Management',
+      'Swipe & Match System',
+      'Real-time Chat',
+      'Premium Subscriptions',
+      'Explore Users'
+    ],
     endpoints: {
-      health: '/api/health',
-      db_status: '/api/db-status',
-      verify: 'POST /api/auth/verify'
+      auth: {
+        verify: 'POST /api/auth/verify',
+        logout: 'POST /api/auth/logout'
+      },
+      profile: {
+        create: 'POST /api/profile/create',
+        get: 'GET /api/profile/me',
+        update: 'PUT /api/profile/me',
+        view: 'GET /api/profile/:userId'
+      },
+      explore: {
+        users: 'GET /api/explore/users',
+        swipe: 'POST /api/explore/swipe',
+        matches: 'GET /api/explore/matches'
+      },
+      chat: {
+        conversations: 'GET /api/chat/conversations',
+        messages: 'GET /api/chat/messages/:matchId',
+        send: 'POST /api/chat/send'
+      },
+      subscription: {
+        plans: 'GET /api/subscription/plans',
+        subscribe: 'POST /api/subscription/subscribe',
+        status: 'GET /api/subscription/status'
+      }
     }
   })
 })
 
-// Start server
-async function startServer() {
-  // Connect to MongoDB first
-  await connectDB()
-  
-  app.listen(PORT, () => {
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    console.log('🚀 Elite Connect Backend')
-    console.log(`📡 Running on port ${PORT}`)
-    console.log(`🌍 App ID: ${process.env.APP_ID || '⚠️  NOT CONFIGURED'}`)
-    console.log(`💾 Database: ${dbConnected ? '✅ MongoDB' : '⚠️  In-memory'}`)
-    console.log('✅ Server ready!')
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    
-    if (!process.env.APP_ID) {
-      console.log('')
-      console.log('⚠️  WARNING: APP_ID not set!')
-      console.log('📝 Add APP_ID to your .env file')
-      console.log('🔗 Get it from: https://developer.worldcoin.org')
-      console.log('')
-    }
-    
-    if (!dbConnected) {
-      console.log('')
-      console.log('⚠️  WARNING: MongoDB not connected')
-      console.log('📝 Add MONGODB_URI to your .env file')
-      console.log('🔗 Get free MongoDB at: https://www.mongodb.com/cloud/atlas')
-      console.log('')
-    }
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err)
+  res.status(500).json({
+    success: false,
+    error: err.message || 'Internal server error'
   })
-}
+})
 
-startServer()
+// ============================================
+// START SERVER
+// ============================================
+app.listen(PORT, () => {
+  console.log('')
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('🚀 Elite Connect Backend (Complete Version)')
+  console.log(`📡 Server: http://localhost:${PORT}`)
+  console.log(`🌍 App ID: ${process.env.APP_ID || '⚠️  NOT CONFIGURED'}`)
+  console.log(`💾 Database: ${MONGODB_URI}`)
+  console.log('✅ Server ready!')
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('')
+  console.log('✨ Features:')
+  console.log('  ✓ World ID Authentication')
+  console.log('  ✓ Profile Management')
+  console.log('  ✓ Swipe & Match System')
+  console.log('  ✓ Real-time Chat')
+  console.log('  ✓ Premium Subscriptions')
+  console.log('  ✓ Payment System')
+  console.log('')
+  console.log('📚 API Documentation: http://localhost:' + PORT)
+  console.log('')
+  
+  if (!process.env.APP_ID) {
+    console.log('⚠️  WARNING: APP_ID not set!')
+    console.log('📝 Add to .env file: APP_ID=app_your_app_id')
+    console.log('')
+  }
+  
+  if (mongoose.connection.readyState !== 1) {
+    console.log('⚠️  WARNING: MongoDB not connected!')
+    console.log('📝 Add to .env file: MONGODB_URI=your_mongodb_uri')
+    console.log('')
+  }
+})
+
+export default app
 // import express from 'express';
 // import mongoose from 'mongoose';
 // import cors from 'cors';
