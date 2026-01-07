@@ -51,11 +51,11 @@ router.post('/verify', async (req, res) => {
         free_connections_limit: parseInt(process.env.FREE_CONNECTIONS) || 2
       });
 
-      console.log('✅ New user created:', user._id);
+      console.log('Ã¢Å“â€¦ New user created:', user._id);
     } else {
       user.last_login = new Date();
       await user.save();
-      console.log('👤 User logged in:', user._id);
+      console.log('Ã°Å¸â€˜Â¤ User logged in:', user._id);
     }
 
     // Generate JWT

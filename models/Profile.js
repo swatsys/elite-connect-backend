@@ -53,4 +53,4 @@ const profileSchema = new mongoose.Schema({
 
 // REMOVED: profileSchema.index({ user_id: 1 }); (duplicate)
 
-export default mongoose.model('Profile', profileSchema);
+export default mongoose.model('Profile', profileSchema)
