@@ -31,7 +31,7 @@ router.post('/verify', async (req, res) => {
         proof: proof,
         merkle_root: merkle_root,
         nullifier_hash: nullifier_hash,
-        verification_level: verification_level || 'device',
+        verification_level: verification_level || 'orb',
         action: process.env.WORLD_ACTION_ID || 'signin'
       })
     });
