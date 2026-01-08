@@ -9,7 +9,7 @@ import profileRoutes from './routes/profile.js';
 import exploreRoutes from './routes/explore.js';
 import chatRoutes from './routes/chat.js';
 import subscriptionRoutes from './routes/subscription.js';
-import worldIdRoutes from './routes/worldId.js';
+//import worldIdRoutes from './routes/worldId.js';
 dotenv.config();
 
 const app = express();
@@ -30,7 +30,7 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/explore', exploreRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/subscription', subscriptionRoutes);
-app.use('/api/worldid', worldIdRoutes);
+//app.use('/api/worldid', worldIdRoutes);
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
