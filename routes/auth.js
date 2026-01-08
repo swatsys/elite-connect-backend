@@ -12,6 +12,8 @@ router.post('/verify', async (req, res) => {
   try {
     const { proof, merkle_root, nullifier_hash, verification_level } = req.body;
 
+    console.log('📥 Verification request:', { nullifier_hash, verification_level });
+
     if (!nullifier_hash) {
       return res.status(400).json({
         success: false,
@@ -19,12 +21,15 @@ router.post('/verify', async (req, res) => {
       });
     }
 
-    // Verify with World ID API
+    // Verify with World ID Cloud
+    console.log('🌍 Verifying with World ID...');
     const verifyRes = await verifyCloudProof(
       req.body,
       process.env.WORLD_APP_ID,
       'signin'
     );
+
+    console.log('✅ Verification result:', verifyRes.success);
 
     if (!verifyRes.success) {
       return res.status(400).json({
@@ -39,23 +44,22 @@ router.post('/verify', async (req, res) => {
     if (!user) {
       user = new User({
         nullifier_hash,
-        verification_level: verification_level || 'orb',
+        verification_level: verification_level || 'device',
         profile_completed: false
       });
       await user.save();
 
-      // Create subscription record
       await Subscription.create({
         user_id: user._id,
         type: 'free',
         free_connections_limit: parseInt(process.env.FREE_CONNECTIONS) || 2
       });
 
-      console.log('Ã¢Å“â€¦ New user created:', user._id);
+      console.log('✅ New user created:', user._id);
     } else {
       user.last_login = new Date();
       await user.save();
-      console.log('Ã°Å¸â€˜Â¤ User logged in:', user._id);
+      console.log('👤 User logged in:', user._id);
     }
 
     // Generate JWT
@@ -76,10 +80,11 @@ router.post('/verify', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Verify error:', error);
+    console.error('❌ Verify error:', error);
     res.status(500).json({
       success: false,
-      error: 'Authentication failed'
+      error: 'Authentication failed',
+      message: error.message
     });
   }
 });
